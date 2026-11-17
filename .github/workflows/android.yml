@@ -1,0 +1,77 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'android-app/**'
+      - '.github/workflows/android.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      APP_URL: ${{ vars.APP_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: check url
+        run: |
+          if [ -z "$APP_URL" ]; then
+            echo "::error::Add APP_URL variable in Settings > Secrets and variables > Actions > Variables"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: install capacitor
+        working-directory: android-app
+        run: npm install
+
+      - name: setup app
+        working-directory: android-app
+        run: |
+          node -e "
+          const u=new URL(process.env.APP_URL);
+          const cfg={
+            appId:'com.layla.abtal',
+            appName:'ليلة الأبطال',
+            webDir:'www',
+            server:{url:u.origin,cleartext:false,allowNavigation:[u.host,'*.firebaseapp.com','*.firebaseio.com','*.googleapis.com','*.gstatic.com']},
+            android:{backgroundColor:'#050b2e'}
+          };
+          require('fs').writeFileSync('capacitor.config.json',JSON.stringify(cfg,null,2));
+          "
+          npx cap add android
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#<application#<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <application#' "$M"
+          npx @capacitor/assets generate --android --iconBackgroundColor '#050b2e' || true
+
+      - name: build apk
+        working-directory: android-app/android
+        run: ./gradlew assembleDebug
+
+      - name: rename
+        run: cp android-app/android/app/build/outputs/apk/debug/app-debug.apk layla-al-abtal.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: layla-al-abtal-apk
+          path: layla-al-abtal.apk
+
+      - name: release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: Build ${{ github.run_number }}
+          files: layla-al-abtal.apk
